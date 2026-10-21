@@ -1,0 +1,487 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>H7 IMU Visualizer</title>
+  <style>
+    :root { --ink:#17212b; --muted:#62717c; --line:#d8e0e4; --panel:#ffffff; --page:#f3f6f5; --green:#0b7661; --red:#be3d35; --orange:#b86816; --blue:#287c9f; --violet:#7954a1; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; background:var(--page); color:var(--ink); font-family:Segoe UI, Arial, sans-serif; font-size:14px; letter-spacing:0; }
+    button { min-height:34px; border:1px solid #b9c6cb; border-radius:5px; background:#fff; color:var(--ink); cursor:pointer; font:inherit; padding:6px 11px; }
+    button:hover:not(:disabled) { background:#edf4f2; border-color:var(--green); }
+    button:disabled { cursor:default; color:#99a5ac; background:#f7f8f8; }
+    button.primary { color:#fff; border-color:var(--green); background:var(--green); }
+    button.primary:hover:not(:disabled) { background:#075e4d; }
+    header { background:#fff; border-bottom:1px solid var(--line); }
+    .bar { max-width:1460px; min-height:64px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .title { font-size:18px; font-weight:650; margin-right:14px; }
+    .actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .state { margin-left:auto; display:flex; gap:8px; align-items:center; color:var(--muted); white-space:nowrap; }
+    .dot { width:9px; height:9px; border-radius:50%; background:#9aa7ad; display:inline-block; }
+    .dot.connected { background:#16a276; }
+    main { max-width:1460px; margin:0 auto; padding:18px 20px 28px; }
+    .metrics { display:grid; grid-template-columns:repeat(6, minmax(130px, 1fr)); border:1px solid var(--line); background:var(--panel); }
+    .metric { min-height:84px; padding:13px 14px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .metric:nth-child(6n) { border-right:0; }
+    .metric:last-child { border-right:0; border-bottom:0; }
+    .label { color:var(--muted); font-size:12px; }
+    .value { margin-top:7px; font-size:22px; font-variant-numeric:tabular-nums; font-weight:600; }
+    .unit { color:var(--muted); font-size:12px; font-weight:400; }
+    .remote { margin-top:14px; border:1px solid var(--line); background:var(--panel); }
+    .remote-head { min-height:45px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 13px; border-bottom:1px solid var(--line); }
+    .remote-title { font-weight:650; }
+    .remote-state { color:var(--muted); font-size:12px; }
+    .remote-state.online { color:var(--green); }
+    .remote-body { display:grid; grid-template-columns:minmax(0, 3fr) minmax(300px, 2fr); }
+    .channel-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; padding:14px; border-right:1px solid var(--line); }
+    .channel-label { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-bottom:6px; }
+    .channel-label strong { color:var(--ink); font-size:13px; font-weight:600; }
+    .channel-track { position:relative; height:12px; overflow:hidden; background:#edf1f1; border:1px solid #d4dfe0; }
+    .channel-center { position:absolute; left:50%; top:-1px; bottom:-1px; width:1px; background:#809097; }
+    .channel-fill { position:absolute; top:1px; bottom:1px; width:50%; transform:scaleX(0); }
+    .channel-fill.positive { left:50%; transform-origin:left center; background:var(--blue); }
+    .channel-fill.negative { right:50%; transform-origin:right center; background:var(--orange); }
+    .switches { display:grid; grid-template-columns:1fr; gap:12px; padding:14px; }
+    .switch-row { display:grid; grid-template-columns:56px 1fr; align-items:center; gap:10px; }
+    .switch-name { color:var(--muted); font-size:12px; }
+    .switch-segments { display:grid; grid-template-columns:repeat(3, 1fr); min-height:30px; border:1px solid #cdd7d9; }
+    .switch-segment { display:flex; align-items:center; justify-content:center; border-right:1px solid #cdd7d9; color:var(--muted); font-size:12px; }
+    .switch-segment:last-child { border-right:0; }
+    .switch-segment.active { color:#fff; background:var(--green); font-weight:650; }
+    .motor-panel { margin-top:14px; border:1px solid var(--line); background:var(--panel); }
+    .motor-table-wrap { overflow-x:auto; }
+    .motor-table { width:100%; min-width:820px; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    .motor-table th, .motor-table td { height:36px; padding:7px 12px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+    .motor-table th { color:var(--muted); font-size:12px; font-weight:600; background:#f8faf9; }
+    .motor-table tbody tr:last-child td { border-bottom:0; }
+    .motor-status { display:inline-flex; align-items:center; gap:6px; color:var(--red); font-weight:600; }
+    .motor-status::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--red); }
+    .motor-status.online { color:var(--green); }
+    .motor-status.online::before { background:var(--green); }
+    .charts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; margin-top:14px; }
+    .chart-card { min-width:0; border:1px solid var(--line); background:var(--panel); }
+    .chart-card.wide { grid-column:span 2; }
+    .chart-head { min-height:45px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 13px; border-bottom:1px solid var(--line); }
+    .chart-title { font-weight:650; }
+    .legend { display:flex; flex-wrap:wrap; gap:11px; color:var(--muted); font-size:12px; }
+    .legend i { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:4px; }
+    canvas { display:block; width:100%; height:275px; }
+    .axis-view { height:275px; background:#fbfcfc; }
+    .bottom { margin-top:14px; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; }
+    .chassis-diagnostics { margin-top:14px; }
+    .chassis-diagnostics .detail { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+    .chassis-diagnostics .detail .diag-half { grid-column:span 2; }
+    .chassis-diagnostics .detail .diag-wide { grid-column:1 / -1; white-space:normal; overflow:visible; overflow-wrap:anywhere; }
+    .pane { padding:13px; border:1px solid var(--line); background:var(--panel); }
+    .pane strong { display:block; margin-bottom:8px; }
+    .detail { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .detail span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .capture-panel { margin-top:14px; }
+    .capture-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .capture-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .capture-status { color:var(--muted); font-variant-numeric:tabular-nums; }
+    @media (max-width:900px) { .metrics { grid-template-columns:repeat(3, 1fr); } .metric:nth-child(3n) { border-right:0; } .charts { grid-template-columns:1fr; } .chart-card.wide { grid-column:span 1; } .bottom { grid-template-columns:1fr; } }
+    @media (max-width:900px) { .remote-body { grid-template-columns:1fr; } .channel-grid { border-right:0; border-bottom:1px solid var(--line); } }
+    @media (max-width:560px) { main { padding:12px; } .bar { padding:10px 12px; } .title { width:100%; margin-right:0; } .state { margin-left:0; } .metrics { grid-template-columns:repeat(2, 1fr); } .metric { border-bottom:1px solid var(--line); } .metric:nth-child(2n) { border-right:0; } .channel-grid { grid-template-columns:1fr; } canvas { height:235px; } }
+  </style>
+</head>
+<body>
+  <header><div class="bar">
+    <div class="title">H7 IMU Visualizer</div>
+    <div class="actions">
+      <button id="select">选择 USB CDC（Type-C）</button>
+      <button id="connect" class="primary" disabled>Connect</button>
+      <button id="clear">Clear Trends</button>
+    </div>
+    <div class="state"><span id="dot" class="dot"></span><span id="status">No serial port selected</span></div>
+  </div></header>
+  <main>
+    <section class="pane"><strong>USB 遥测接收诊断</strong><div class="detail"><span id="usbRxState">0 bytes | 0 valid frames | 0 invalid lines</span><span id="usbRxRate">0 Hz</span><span id="usbRxRaw" class="diag-wide">等待 Type-C 数据</span></div></section>
+    <section class="pane capture-panel">
+      <div class="capture-head"><strong>云台故障采集</strong><div class="capture-actions"><button id="captureStart" class="primary">开始采集</button><button id="captureStop" disabled>停止采集</button><button id="captureDownload" disabled>下载 CSV</button><button id="captureClear">清空采集</button></div></div>
+      <div class="detail"><span id="captureStatus" class="capture-status">未采集</span><span class="diag-wide">记录 S0、模式、ch0、Yaw 目标/误差/指令、编码器位置/速度和 BMI088 Z 轴数据</span></div>
+    </section>
+    <section class="metrics">
+      <div class="metric"><div class="label">IMU temperature</div><div class="value" id="temp">-- <span class="unit">C</span></div></div>
+      <div class="metric"><div class="label">H7 MCU temperature</div><div class="value" id="mcuTemp">-- <span class="unit">C</span></div></div>
+      <div class="metric"><div class="label">IMU status</div><div class="value" id="ready">WAIT</div></div>
+      <div class="metric"><div class="label">Bias samples</div><div class="value" id="count">0</div></div>
+      <div class="metric"><div class="label">Yaw actual (IMU)</div><div class="value" id="yaw">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">Pitch actual (IMU)</div><div class="value" id="pitch">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">Yaw target</div><div class="value" id="yawTarget">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">Pitch target</div><div class="value" id="pitchTarget">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">Yaw rate</div><div class="value" id="rate">-- <span class="unit">deg/s</span></div></div>
+      <div class="metric"><div class="label">SLAM 状态</div><div class="value" id="slamState">等待数据</div></div>
+      <div class="metric"><div class="label">SLAM X / Y</div><div class="value" id="slamXY">-- <span class="unit">m</span></div></div>
+      <div class="metric"><div class="label">SLAM Z</div><div class="value" id="slamZ">-- <span class="unit">m</span></div></div>
+      <div class="metric"><div class="label">SLAM Yaw</div><div class="value" id="slamYaw">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">SLAM Roll / Pitch</div><div class="value" id="slamRP">-- <span class="unit">deg</span></div></div>
+      <div class="metric"><div class="label">SLAM 帧 / 错误</div><div class="value" id="slamFrames">--</div></div>
+      <div class="metric"><div class="label">SLAM 原始帧（HEX）</div><div class="value" id="slamRaw">--</div></div>
+    </section>
+    <section class="remote">
+      <div class="remote-head"><span class="remote-title">Remote control</span><span id="remoteState" class="remote-state">Waiting for receiver data</span></div>
+      <div class="remote-body">
+        <div class="channel-grid">
+          <div class="channel"><div class="channel-label"><strong>ch0</strong><span id="ch0Value">0</span></div><div class="channel-track"><span class="channel-center"></span><span id="ch0Pos" class="channel-fill positive"></span><span id="ch0Neg" class="channel-fill negative"></span></div></div>
+          <div class="channel"><div class="channel-label"><strong>ch1</strong><span id="ch1Value">0</span></div><div class="channel-track"><span class="channel-center"></span><span id="ch1Pos" class="channel-fill positive"></span><span id="ch1Neg" class="channel-fill negative"></span></div></div>
+          <div class="channel"><div class="channel-label"><strong>ch2</strong><span id="ch2Value">0</span></div><div class="channel-track"><span class="channel-center"></span><span id="ch2Pos" class="channel-fill positive"></span><span id="ch2Neg" class="channel-fill negative"></span></div></div>
+          <div class="channel"><div class="channel-label"><strong>ch3</strong><span id="ch3Value">0</span></div><div class="channel-track"><span class="channel-center"></span><span id="ch3Pos" class="channel-fill positive"></span><span id="ch3Neg" class="channel-fill negative"></span></div></div>
+        </div>
+        <div class="switches">
+          <div class="switch-row"><span class="switch-name">S0 / mode</span><div class="switch-segments" id="sw0"><span data-value="1" class="switch-segment">UP</span><span data-value="3" class="switch-segment">MID</span><span data-value="2" class="switch-segment">DOWN</span></div></div>
+          <div class="switch-row"><span class="switch-name">S1 / aux</span><div class="switch-segments" id="sw1"><span data-value="1" class="switch-segment">UP</span><span data-value="3" class="switch-segment">MID</span><span data-value="2" class="switch-segment">DOWN</span></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="motor-panel">
+      <div class="remote-head"><span class="remote-title">麦轮底盘与双 GM6020 云台</span><span id="motorSummary" class="remote-state">等待电机遥测</span></div>
+      <div class="motor-table-wrap"><table class="motor-table"><thead><tr><th>状态</th><th>用途</th><th>类型</th><th>CAN</th><th>电机 ID</th><th>反馈 ID</th><th>位置 (rad)</th><th>速度 (rad/s)</th><th>反馈电流</th><th>温度 (C)</th><th>反馈间隔 (ms)</th></tr></thead><tbody id="motorRows"></tbody></table></div>
+    </section>
+    <section class="motor-panel">
+      <div class="remote-head"><span class="remote-title">顶部 DM-IMU-L1（CAN3）检测</span><span id="extraImuState" class="remote-state">等待 IMU 遥测</span></div>
+      <div class="pane"><div class="detail">
+        <span id="extraImuBus">CAN -- | ID --</span><span id="extraImuFrames">Frames -- | age --</span><span id="extraImuMask">Data --</span>
+        <span id="extraImuEuler">Pitch -- | Yaw -- | Roll --</span><span id="extraImuGyro">Gyro --</span><span id="extraImuAccel">Accel --</span>
+        <span id="extraImuQuaternion">Quaternion --</span><span id="extraImuTemp">Temperature --</span><span id="extraImuRaw">RAW --</span>
+      </div></div>
+    </section>
+    <section class="charts">
+      <article class="chart-card">
+        <div class="chart-head"><span class="chart-title">Gyro Z</span><span class="legend"><span><i style="background:#be3d35"></i>raw</span><span><i style="background:#0b7661"></i>corrected</span><span><i style="background:#b86816"></i>bias</span></span></div>
+        <canvas id="gyroChart"></canvas>
+      </article>
+      <article class="chart-card">
+        <div class="chart-head"><span class="chart-title">Attitude</span><span class="legend"><span><i style="background:#287c9f"></i>yaw</span><span><i style="background:#7954a1"></i>pitch</span><span><i style="background:#b86816"></i>roll</span></span></div>
+        <canvas id="attitudeChart"></canvas>
+      </article>
+      <article class="chart-card">
+        <div class="chart-head"><span class="chart-title">Spatial attitude</span><span class="legend"><span><i style="background:#be3d35"></i>X</span><span><i style="background:#0b7661"></i>Y</span><span><i style="background:#287c9f"></i>Z</span></span></div>
+        <canvas id="axisView" class="axis-view"></canvas>
+      </article>
+      <article class="chart-card">
+        <div class="chart-head"><span class="chart-title">Gimbal attitude tracking</span><span class="legend"><span><i style="background:#0b7661"></i>Yaw target</span><span><i style="background:#287c9f"></i>Yaw actual</span><span><i style="background:#be3d35"></i>Pitch target</span><span><i style="background:#7954a1"></i>Pitch actual</span></span></div>
+        <canvas id="gimbalChart"></canvas>
+      </article>
+      <article class="chart-card wide">
+        <div class="chart-head"><span class="chart-title">Temperature and calibration</span><span class="legend"><span><i style="background:#be3d35"></i>IMU (C)</span><span><i style="background:#287c9f"></i>H7 MCU (C)</span><span><i style="background:#0b7661"></i>bias count / 50</span></span></div>
+        <canvas id="temperatureChart"></canvas>
+      </article>
+    </section>
+    <section class="chassis-diagnostics"><div class="pane"><strong>底盘与功率限流</strong><div class="detail"><span id="chassisState">Mode -- | armed --</span><span id="chassisReference">vx -- | vy -- | wz --</span><span id="chassisCurrent12">ID1 -- | ID2 --</span><span id="chassisCurrent34">ID3 -- | ID4 --</span><span id="can1State" class="diag-half">CAN1 RX -- | TX -- | reject -- | last --</span><span id="can2State" class="diag-wide">CAN2 RX -- | TX -- | reject -- | last --</span><span id="chassisPower" class="diag-wide">Power --</span><span id="chassisPowerLimits" class="diag-half">Limits --</span><span id="chassisPowerAttenuation" class="diag-half">Scale --</span></div></div></section>
+  </main>
+  <script>
+    const history = [];
+    const yawCapture = [];
+    const yawCaptureFields = ['t','event','sw0','gimbal_mode','armed','rc_lost','ch0','yaw','yaw_target','yaw_err','yaw_cmd','yaw_sp_vel','yaw_fb_pos','yaw_fb_vel','yaw_ref','yaw_rate','raw_gz','gyro_z','bias_z','yaw_online','yaw_state','big_yaw_fb_pos','small_yaw_fb_pos','big_yaw_cmd','small_yaw_ref','big_yaw_follow_target','big_yaw_err','big_yaw_online','small_yaw_online','pitch_online'];
+    const maxHistory = 2400;
+    let port = null, reader = null, connected = false, sessionStart = 0;
+    let captureActive = false, captureLast = null;
+    let usbBytes = 0, usbValidFrames = 0, usbInvalidLines = 0, usbLastRaw = '', usbRateFrames = 0, usbRateStart = 0;
+    const el = id => document.getElementById(id);
+    const motorFields = Array.from({length:10}, (_, i) => ['type','can','id','fb_id','online','age','pos','vel','current','temp'].map(key => 'm' + i + '_' + key)).flat();
+    const fields = ['temp','mcu_temp','mcu_temp_ok','mcu_temp_raw','mcu_vref_raw','mcu_vdda_mv','ready','bias_count','raw_gx','raw_gy','raw_gz','gyro_x','gyro_y','gyro_z','bias_x','bias_y','bias_z','yaw','pitch','roll','yaw_rate','rc_lost','ch0','ch1','ch2','ch3','ch4','sw0','sw1','sbus_frames','sbus_errors','gimbal_mode','armed','yaw_online','pitch_online','yaw_state','pitch_state','yaw_fb_pos','pitch_fb_pos','yaw_fb_vel','pitch_fb_vel','yaw_ref','pitch_ref','yaw_target','pitch_target','yaw_err','pitch_err','yaw_cmd','pitch_cmd','yaw_sp_pos','pitch_sp_pos','yaw_sp_vel','pitch_sp_vel','yaw_joint','pitch_joint','pitch_imu_lo','pitch_imu_hi','pitch_motor_lo','pitch_motor_hi','slam_online','slam_x','slam_y','slam_z','slam_roll','slam_pitch','slam_yaw','slam_age','slam_frames','slam_errors','slam_uart_errors','slam_rx_bytes','slam_overflow','trigger_online','trigger_mode','trigger_target','trigger_feedback','trigger_current','trigger_sent','can3_rx','can3_last_id','can3_tx','can3_tx_reject','can3_tx_id','can3_tx_b0','can3_tx_b1','can3_tx_b2','can3_tx_b3','can3_tx_b4','can3_tx_b5','can3_tx_b6','can3_tx_b7','can3_tec','can3_rec','can3_lec','can3_activity','can3_ep','can3_warning','can3_busoff','chassis_mode','chassis_vx','chassis_vy','chassis_wz','chassis_i1','chassis_i2','chassis_i3','chassis_i4','chassis_power_enabled','chassis_power_ref','chassis_power_budget','chassis_power_before','chassis_power_after','chassis_power_limit1','chassis_power_limit2','chassis_power_limit3','chassis_power_limit4','chassis_power_k1','chassis_power_k2','chassis_power_k3','chassis_power_k4','can1_rx','can1_tx','can1_tx_reject','can1_tx_id','can1_tec','can1_rec','can1_lec','can1_activity','can1_ep','can1_warning','can1_busoff','can2_rx','can2_rx_id','can2_tx','can2_tx_reject','can2_tx_id','can2_tec','can2_rec','can2_lec','can2_activity','can2_ep','can2_warning','can2_busoff','extra_imu_enabled','extra_imu_online','extra_imu_can','extra_imu_id','extra_imu_master_id','extra_imu_rx_id','extra_imu_age','extra_imu_frames','extra_imu_invalid','extra_imu_mask','extra_imu_type','extra_imu_temp','extra_imu_pitch','extra_imu_yaw','extra_imu_roll','extra_imu_gx','extra_imu_gy','extra_imu_gz','extra_imu_ax','extra_imu_ay','extra_imu_az','extra_imu_qw','extra_imu_qx','extra_imu_qy','extra_imu_qz','motor_count',...motorFields];
+    ['evo_pos_cmd','evo_vel_cmd','evo_kp','evo_kd','evo_torque_cmd'].forEach(key => fields.push(key));
+    fields.push('slam_raw_len');
+    for (let i = 0; i < 15; i++) fields.push('slam_raw' + i);
+    for (let i = 0; i < 8; i++) fields.push('extra_imu_raw' + i);
+    let latest = Object.fromEntries(fields.map(k => [k, 0]));
+    const receivedFields = new Set();
+
+    function setStatus(text, state) { el('status').textContent = text; el('dot').className = 'dot' + (state ? ' ' + state : ''); }
+    function number(v) { return Number.isFinite(v) ? v : 0; }
+    function updateUsbReception() {
+      const now = performance.now();
+      const seconds = usbRateStart ? Math.max(0.001, (now - usbRateStart) / 1000) : 1;
+      const hz = usbRateFrames / seconds;
+      if (seconds >= 1) { usbRateFrames = 0; usbRateStart = now; }
+      el('usbRxState').textContent = usbBytes + ' bytes | ' + usbValidFrames + ' valid frames | ' + usbInvalidLines + ' invalid lines';
+      el('usbRxRate').textContent = hz.toFixed(1) + ' Hz';
+      el('usbRxRaw').textContent = usbLastRaw ? ('Last: ' + usbLastRaw) : '等待 Type-C 数据';
+    }
+    function parseLine(line) {
+      const data = {};
+      line.trim().split(',').forEach(part => { const index = part.indexOf(':'); if (index > 0) { const key = part.slice(0,index).trim(); const value = Number(part.slice(index + 1)); if (Number.isFinite(value)) data[key] = value; } });
+      const telemetryFrame = Object.prototype.hasOwnProperty.call(data, 'temp') && Object.prototype.hasOwnProperty.call(data, 'yaw');
+      const motorFrame = Object.prototype.hasOwnProperty.call(data, 'motor_count');
+      /* 三轴云台使用 big_yaw 与 small_yaw 前缀字段；映射到旧版页面字段，
+       * 同时保留原字段供采样 CSV 记录，避免页面显示和历史工具断链。 */
+      if (Object.prototype.hasOwnProperty.call(data, 'big_yaw_follow_target')) {
+        data.yaw_target = data.big_yaw_follow_target;
+        data.yaw_err = data.big_yaw_err;
+        data.yaw_cmd = data.big_yaw_cmd;
+        data.yaw_fb_pos = data.small_yaw_fb_pos;
+        data.yaw_ref = data.small_yaw_ref;
+        data.yaw_online = data.big_yaw_online;
+        data.yaw_state = data.big_yaw_state;
+      }
+      return telemetryFrame || motorFrame ? data : null;
+    }
+    function format(v, digits) { return Number.isFinite(v) ? v.toFixed(digits) : '--'; }
+    function updateCaptureStatus() {
+      const status = captureActive ? '采集中' : (yawCapture.length ? '已停止' : '未采集');
+      el('captureStatus').textContent = status + ' | ' + yawCapture.length + ' 帧' + (captureActive ? ' | 请依次操作：右打、归中、切上档、回中档' : '');
+      el('captureStart').disabled = captureActive;
+      el('captureStop').disabled = !captureActive;
+      el('captureDownload').disabled = yawCapture.length === 0;
+    }
+    function captureEvent(sample) {
+      if (!captureLast) return 'start';
+      const events = [];
+      if (sample.sw0 !== captureLast.sw0) events.push('sw0:' + Math.round(sample.sw0));
+      if (sample.gimbal_mode !== captureLast.gimbal_mode) events.push('mode:' + Math.round(sample.gimbal_mode));
+      if (Math.abs(number(sample.ch0)) <= 10 && Math.abs(number(captureLast.ch0)) > 10) events.push('ch0_deadband');
+      if (Math.abs(number(sample.yaw_target) - number(captureLast.yaw_target)) > 20) events.push('target_jump');
+      return events.join('|');
+    }
+    function captureSample(sample) {
+      if (!captureActive) return;
+      const row = {};
+      yawCaptureFields.forEach(key => { row[key] = key === 'event' ? captureEvent(sample) : number(sample[key]); });
+      yawCapture.push(row); captureLast = sample;
+      updateCaptureStatus();
+    }
+    function csvCell(value) {
+      const text = value == null ? '' : String(value);
+      return /[",\n]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+    }
+    function downloadCapture() {
+      if (!yawCapture.length) return;
+      const lines = [yawCaptureFields.join(',')];
+      yawCapture.forEach(row => lines.push(yawCaptureFields.map(key => csvCell(row[key])).join(',')));
+      const blob = new Blob([lines.join('\n') + '\n'], {type:'text/csv;charset=utf-8'});
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = 'h7_yaw_diagnostic_' + new Date().toISOString().replace(/[\\:]/g, '-').replace(/\.\d{3}Z$/, 'Z') + '.csv';
+      link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }
+    function updateMetrics() {
+      el('temp').innerHTML = format(latest.temp, 2) + ' <span class="unit">C</span>';
+      el('mcuTemp').innerHTML = latest.mcu_temp_ok ?
+        format(latest.mcu_temp, 2) + ' <span class="unit">C</span>' :
+        '-- <span class="unit">C</span>';
+      el('ready').textContent = latest.ready ? 'READY' : 'WAIT';
+      el('ready').style.color = latest.ready ? '#0b7661' : '#b86816';
+      el('count').textContent = Math.round(latest.bias_count).toString();
+      el('yaw').innerHTML = format(latest.yaw, 2) + ' <span class="unit">deg</span>';
+      el('pitch').innerHTML = format(latest.pitch, 2) + ' <span class="unit">deg</span>';
+      el('yawTarget').innerHTML = (receivedFields.has('yaw_target') ? format(latest.yaw_target, 2) : '--') + ' <span class="unit">deg</span>';
+      el('pitchTarget').innerHTML = (receivedFields.has('pitch_target') ? format(latest.pitch_target, 2) : '--') + ' <span class="unit">deg</span>';
+      el('rate').innerHTML = format(latest.yaw_rate, 3) + ' <span class="unit">deg/s</span>';
+      updateSlam();
+      updateExtraImu();
+      updateRemote();
+      updateMotorTable();
+    }
+    function updateSlam() {
+      const hasSlam = receivedFields.has('slam_frames');
+      const online = hasSlam && number(latest.slam_online) !== 0;
+      el('slamState').textContent = !hasSlam ? '当前固件未发送' : (online ? '在线' : '离线');
+      el('slamState').style.color = online ? '#0b7661' : '#b86816';
+      el('slamXY').innerHTML = hasSlam ? (format(latest.slam_x, 2) + ' / ' + format(latest.slam_y, 2) + ' <span class="unit">m</span>') : '-- <span class="unit">m</span>';
+      el('slamZ').innerHTML = hasSlam ? (format(latest.slam_z, 2) + ' <span class="unit">m</span>') : '-- <span class="unit">m</span>';
+      el('slamYaw').innerHTML = hasSlam ? (format(latest.slam_yaw, 1) + ' <span class="unit">deg</span>') : '-- <span class="unit">deg</span>';
+      el('slamRP').innerHTML = hasSlam ? (format(latest.slam_roll, 1) + ' / ' + format(latest.slam_pitch, 1) + ' <span class="unit">deg</span>') : '-- <span class="unit">deg</span>';
+      el('slamFrames').textContent = hasSlam ? (Math.round(number(latest.slam_frames)) + ' / 帧错 ' + Math.round(number(latest.slam_errors)) + ' / 串口错 ' + Math.round(number(latest.slam_uart_errors)) + '，' + Math.round(number(latest.slam_age)) + ' ms，RX ' + Math.round(number(latest.slam_rx_bytes)) + ' B') : '--';
+      const rawLength = Math.min(15, Math.max(0, Math.round(number(latest.slam_raw_len))));
+      el('slamRaw').textContent = rawLength ? Array.from({length:rawLength}, (_, i) => Math.round(number(latest['slam_raw' + i])).toString(16).toUpperCase().padStart(2, '0')).join(' ') : '--';
+    }
+    function updateExtraImu() {
+      const configured = receivedFields.has('extra_imu_enabled') && number(latest.extra_imu_enabled) !== 0;
+      const online = configured && number(latest.extra_imu_online) !== 0;
+      el('extraImuState').textContent = !receivedFields.has('extra_imu_enabled') ? '当前固件未发送顶部 IMU 字段' : (!configured ? '配置未启用' : (online ? '在线（仅监测，不参与控制）' : '离线 / 等待 CAN3 数据'));
+      el('extraImuState').className = 'remote-state' + (online ? ' online' : '');
+      el('extraImuBus').textContent = configured ? ('CAN' + Math.round(number(latest.extra_imu_can)) + ' | CAN ID 0x' + Math.round(number(latest.extra_imu_id)).toString(16).toUpperCase() + ' | MST 0x' + Math.round(number(latest.extra_imu_master_id)).toString(16).toUpperCase() + ' | RX 0x' + Math.round(number(latest.extra_imu_rx_id)).toString(16).toUpperCase()) : 'CAN -- | ID --';
+      el('extraImuFrames').textContent = configured ? ('Frames ' + Math.round(number(latest.extra_imu_frames)) + ' | invalid ' + Math.round(number(latest.extra_imu_invalid)) + ' | age ' + Math.round(number(latest.extra_imu_age)) + ' ms') : 'Frames -- | age --';
+      const mask = Math.round(number(latest.extra_imu_mask));
+      el('extraImuMask').textContent = configured ? ('Data ' + (mask & 1 ? 'ACC ' : '') + (mask & 2 ? 'GYRO ' : '') + (mask & 4 ? 'EULER ' : '') + (mask & 8 ? 'QUAT' : '') + ' | last type 0x' + Math.round(number(latest.extra_imu_type)).toString(16).toUpperCase()) : 'Data --';
+      el('extraImuEuler').textContent = 'Pitch ' + format(latest.extra_imu_pitch, 2) + '° | Yaw ' + format(latest.extra_imu_yaw, 2) + '° | Roll ' + format(latest.extra_imu_roll, 2) + '°';
+      el('extraImuGyro').textContent = 'Gyro ' + format(latest.extra_imu_gx, 3) + ' / ' + format(latest.extra_imu_gy, 3) + ' / ' + format(latest.extra_imu_gz, 3) + ' rad/s';
+      el('extraImuAccel').textContent = 'Accel ' + format(latest.extra_imu_ax, 2) + ' / ' + format(latest.extra_imu_ay, 2) + ' / ' + format(latest.extra_imu_az, 2) + ' m/s²';
+      el('extraImuQuaternion').textContent = 'Q ' + format(latest.extra_imu_qw, 4) + ' / ' + format(latest.extra_imu_qx, 4) + ' / ' + format(latest.extra_imu_qy, 4) + ' / ' + format(latest.extra_imu_qz, 4);
+      el('extraImuTemp').textContent = 'Temperature ' + format(latest.extra_imu_temp, 1) + ' °C';
+      const hasRaw = receivedFields.has('extra_imu_raw0');
+      el('extraImuRaw').textContent = hasRaw ? ('RAW ' + Array.from({length:8}, (_, i) => Math.round(number(latest['extra_imu_raw' + i])).toString(16).toUpperCase().padStart(2, '0')).join(' ')) : 'RAW --';
+    }
+    function updateChassisDiagnostics() {
+      const required = ['chassis_mode','chassis_vx','chassis_vy','chassis_wz','chassis_i1','chassis_i2','chassis_i3','chassis_i4','can1_rx','can1_tx','can1_tx_reject','can1_tx_id'];
+      if (!required.every(key => receivedFields.has(key))) {
+        el('chassisState').textContent = '当前固件未发送 CAN1 底盘诊断字段';
+        el('chassisReference').textContent = '请烧录本工程最新固件';
+        el('chassisCurrent12').textContent = 'ID1 -- | ID2 --';
+        el('chassisCurrent34').textContent = 'ID3 -- | ID4 --';
+        el('can1State').textContent = 'CAN1 RX -- | TX -- | reject -- | last --';
+        el('can2State').textContent = 'CAN2 RX -- | TX -- | reject -- | last --';
+        return;
+      }
+      el('chassisState').textContent = 'Mode ' + Math.round(number(latest.chassis_mode)) + ' | armed ' + Math.round(number(latest.armed));
+      el('chassisReference').textContent = 'vx ' + format(latest.chassis_vx, 2) + ' | vy ' + format(latest.chassis_vy, 2) + ' | wz ' + format(latest.chassis_wz, 2);
+      if (receivedFields.has('evo_vel_cmd')) {
+        el('chassisCurrent12').textContent = 'EVO pos ' + format(latest.evo_pos_cmd, 3) + ' | vel ' + format(latest.evo_vel_cmd, 3) + ' rad/s';
+        el('chassisCurrent34').textContent = 'MIT Kp ' + format(latest.evo_kp, 2) + ' | Kd ' + format(latest.evo_kd, 2) + ' | T ' + format(latest.evo_torque_cmd, 3);
+      } else {
+        el('chassisCurrent12').textContent = 'ID1 ' + format(latest.chassis_i1, 0) + ' | ID2 ' + format(latest.chassis_i2, 0);
+        el('chassisCurrent34').textContent = 'ID3 ' + format(latest.chassis_i3, 0) + ' | ID4 ' + format(latest.chassis_i4, 0);
+      }
+      el('can1State').textContent = 'CAN1 RX ' + Math.round(number(latest.can1_rx)) + ' | TX ' + Math.round(number(latest.can1_tx)) + ' | reject ' + Math.round(number(latest.can1_tx_reject)) + ' | TEC ' + Math.round(number(latest.can1_tec)) + ' | REC ' + Math.round(number(latest.can1_rec)) + ' | bus-off ' + Math.round(number(latest.can1_busoff)) + ' | last 0x' + Math.round(number(latest.can1_tx_id)).toString(16).toUpperCase();
+      if (['can2_rx','can2_rx_id','can2_tx','can2_tx_reject','can2_tx_id'].every(key => receivedFields.has(key))) {
+        el('can2State').textContent = 'CAN2 RX ' + Math.round(number(latest.can2_rx)) + ' (last 0x' + Math.round(number(latest.can2_rx_id)).toString(16).toUpperCase() + ') | TX ' + Math.round(number(latest.can2_tx)) + ' (last 0x' + Math.round(number(latest.can2_tx_id)).toString(16).toUpperCase() + ') | expected 0x205 / 0x52 | reject ' + Math.round(number(latest.can2_tx_reject)) + ' | TEC ' + Math.round(number(latest.can2_tec)) + ' REC ' + Math.round(number(latest.can2_rec)) + ' LEC ' + Math.round(number(latest.can2_lec));
+      } else {
+        el('can2State').textContent = 'CAN2 诊断字段未收到';
+      }
+      if (receivedFields.has('chassis_power_enabled')) {
+        el('chassisPower').textContent = 'Power ' + (latest.chassis_power_enabled ? 'ON' : 'OFF') +
+          ' | ref ' + format(latest.chassis_power_ref, 1) + ' W | budget ' + format(latest.chassis_power_budget, 1) +
+          ' W | predict ' + format(latest.chassis_power_before, 1) + ' -> ' + format(latest.chassis_power_after, 1) + ' W';
+        el('chassisPowerLimits').textContent = 'Limits ' + format(latest.chassis_power_limit1, 1) + ' / ' +
+          format(latest.chassis_power_limit2, 1) + ' / ' + format(latest.chassis_power_limit3, 1) + ' / ' +
+          format(latest.chassis_power_limit4, 1) + ' W';
+        el('chassisPowerAttenuation').textContent = 'Scale ' + format(latest.chassis_power_k1, 3) + ' / ' +
+          format(latest.chassis_power_k2, 3) + ' / ' + format(latest.chassis_power_k3, 3) + ' / ' +
+          format(latest.chassis_power_k4, 3);
+      } else {
+        el('chassisPower').textContent = 'Power limiter telemetry unavailable';
+        el('chassisPowerLimits').textContent = 'Limits --';
+        el('chassisPowerAttenuation').textContent = 'Scale --';
+      }
+    }
+    function updateRemote() {
+      for (let i = 0; i < 4; i++) {
+        const value = Math.max(-660, Math.min(660, number(latest['ch' + i]))), ratio = Math.abs(value) / 660;
+        el('ch' + i + 'Value').textContent = Math.round(value).toString();
+        el('ch' + i + 'Pos').style.transform = 'scaleX(' + (value > 0 ? ratio : 0) + ')';
+        el('ch' + i + 'Neg').style.transform = 'scaleX(' + (value < 0 ? ratio : 0) + ')';
+      }
+      ['sw0','sw1'].forEach(id => el(id).querySelectorAll('[data-value]').forEach(segment => segment.classList.toggle('active', Number(segment.dataset.value) === Math.round(number(latest[id])))));
+      const online = !latest.rc_lost;
+      el('remoteState').textContent = online ? 'Receiver online | ' + Math.round(number(latest.sbus_frames)) + ' SBUS frames | ' + Math.round(number(latest.sbus_errors)) + ' errors' : 'Receiver offline';
+      el('remoteState').className = 'remote-state' + (online ? ' online' : '');
+    }
+    function motorTypeName(type) {
+      return ({1:'M3508', 2:'M2006', 3:'GM6020', 4:'DM4310', 5:'EVO4310'})[Math.round(number(type))] || 'Unknown';
+    }
+    function mecanumMotorRole(type, can, id) {
+      type = Math.round(number(type)); can = Math.round(number(can)); id = Math.round(number(id));
+      if (type === 1 && can === 1 && id >= 1 && id <= 4) return '麦轮底盘 ID' + id;
+      if (type === 3 && can === 1 && id === 1) return '云台 Yaw';
+      if (type === 3 && can === 2 && id === 1) return '云台 Pitch';
+      if (type === 1 && can === 2 && id === 1) return '右摩擦轮';
+      if (type === 1 && can === 2 && id === 2) return '左摩擦轮';
+      return '未命名';
+    }
+    function updateMotorTable() {
+      const count = Math.min(10, Math.max(0, Math.round(number(latest.motor_count))));
+      const rows = [];
+      let onlineCount = 0;
+      for (let i = 0; i < count; i++) {
+        const prefix = 'm' + i + '_', online = number(latest[prefix + 'online']) !== 0;
+        if (online) onlineCount++;
+        const type = latest[prefix + 'type'], can = latest[prefix + 'can'], id = latest[prefix + 'id'];
+        rows.push('<tr><td><span class="motor-status' + (online ? ' online' : '') + '">' + (online ? '在线' : '离线') + '</span></td>' +
+          '<td>' + mecanumMotorRole(type, can, id) + '</td><td>' + motorTypeName(type) + '</td><td>CAN' + Math.round(number(can)) + '</td>' +
+          '<td>' + Math.round(number(id)) + '</td><td>0x' + Math.round(number(latest[prefix + 'fb_id'])).toString(16).toUpperCase() + '</td>' +
+          '<td>' + format(latest[prefix + 'pos'], 4) + '</td><td>' + format(latest[prefix + 'vel'], 4) + '</td>' +
+          '<td>' + format(latest[prefix + 'current'], 0) + '</td><td>' + format(latest[prefix + 'temp'], 1) + '</td>' +
+          '<td>' + Math.round(number(latest[prefix + 'age'])) + '</td></tr>');
+      }
+      el('motorRows').innerHTML = rows.join('');
+      el('motorSummary').textContent = count ? onlineCount + ' / ' + count + ' 在线，200 ms 内有反馈' : '等待电机初始化';
+      el('motorSummary').className = 'remote-state' + (onlineCount ? ' online' : '');
+    }
+    function addSample(data) {
+      /* 固件每秒发送一次心跳帧；它只用于确认 USB 链路，不能覆盖上一帧真实姿态。 */
+      if (data.telemetry_heartbeat) return;
+      usbValidFrames++; usbRateFrames++; updateUsbReception();
+      latest = {...latest, ...data};
+      Object.keys(data).forEach(key => receivedFields.add(key));
+      updateChassisDiagnostics();
+      const sample = {...latest, t: (performance.now() - sessionStart) / 1000};
+      history.push(sample); if (history.length > maxHistory) history.shift();
+      captureSample(sample);
+      updateMetrics(); drawAll();
+    }
+    async function choosePort() {
+      if (!('serial' in navigator)) { setStatus('Use Chrome or Edge on localhost', ''); return; }
+      try { port = await navigator.serial.requestPort(); el('connect').disabled = false; setStatus('Serial port selected', ''); } catch (_) { setStatus('Serial selection canceled', ''); }
+    }
+    async function connect() {
+      if (!port) return;
+      try { await port.open({baudRate:921600}); connected = true; sessionStart = performance.now(); usbBytes = 0; usbValidFrames = 0; usbInvalidLines = 0; usbLastRaw = ''; usbRateFrames = 0; usbRateStart = performance.now(); updateUsbReception(); el('connect').textContent = 'Disconnect'; setStatus('Connected (USB CDC / Type-C)', 'connected'); readLoop(); }
+      catch (err) { setStatus('Open failed: ' + err.message, ''); }
+    }
+    async function disconnect() {
+      connected = false; if (reader) { try { await reader.cancel(); } catch (_) {} }
+      if (port && port.readable) { try { await port.close(); } catch (_) {} }
+      reader = null; el('connect').textContent = 'Connect'; setStatus('Disconnected', '');
+    }
+    async function readLoop() {
+      const decoder = new TextDecoder(); let pending = '';
+      try { while (connected && port.readable) { reader = port.readable.getReader(); try { while (connected) { const {value, done} = await reader.read(); if (done) break; usbBytes += value ? value.length : 0; pending += decoder.decode(value, {stream:true}); const lines = pending.split(/\r?\n/); pending = lines.pop(); lines.forEach(line => { if (!line.trim()) return; usbLastRaw = line.slice(0, 260); const data = parseLine(line); if (data) addSample(data); else { usbInvalidLines++; updateUsbReception(); } }); } } finally { reader.releaseLock(); reader = null; } } }
+      catch (err) { if (connected) setStatus('Read failed: ' + err.message, ''); }
+      if (connected) disconnect();
+    }
+    function clearHistory() { history.length = 0; drawAll(); updateMetrics(); }
+    function startCapture() { yawCapture.length = 0; captureLast = null; captureActive = true; updateCaptureStatus(); }
+    function stopCapture() { captureActive = false; updateCaptureStatus(); }
+    function drawChart(canvasId, series, yLabel) {
+      const canvas = el(canvasId), rect = canvas.getBoundingClientRect(), ratio = window.devicePixelRatio || 1, ctx = canvas.getContext('2d');
+      canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio); ctx.setTransform(ratio,0,0,ratio,0,0);
+      const w = rect.width, h = rect.height, pad = {l:52,r:14,t:14,b:28}; ctx.clearRect(0,0,w,h); ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+      if (!history.length) { ctx.fillStyle='#62717c'; ctx.font='13px Segoe UI'; ctx.textAlign='center'; ctx.fillText('Waiting for telemetry',w/2,h/2); return; }
+      const values = history.flatMap(s => series.map(x => number(x.get(s)))); let min = Math.min(...values), max = Math.max(...values); if (max-min < 0.001) { min -= 0.5; max += 0.5; } const margin=(max-min)*0.12; min-=margin; max+=margin;
+      ctx.strokeStyle='#e3e9ea'; ctx.lineWidth=1; ctx.font='11px Segoe UI'; ctx.fillStyle='#62717c'; ctx.textAlign='right';
+      for(let i=0;i<=4;i++){ const y=pad.t+(h-pad.t-pad.b)*i/4, value=max-(max-min)*i/4; ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.fillText(value.toFixed(Math.abs(value)<1?3:1),pad.l-6,y+4); }
+      ctx.textAlign='left'; ctx.fillText(yLabel,pad.l,pad.t-3); const start=history[0].t, end=history[history.length-1].t; ctx.textAlign='right'; ctx.fillText((end-start).toFixed(1)+' s',w-pad.r,h-8);
+      series.forEach(line => { ctx.beginPath(); ctx.strokeStyle=line.color; ctx.lineWidth=1.5; history.forEach((s,i)=>{const x=pad.l+(w-pad.l-pad.r)*(history.length===1?0:i/(history.length-1));const y=pad.t+(h-pad.t-pad.b)*(max-number(line.get(s)))/(max-min);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke(); });
+    }
+    function drawAxisView() {
+      const canvas = el('axisView'), rect = canvas.getBoundingClientRect(), ratio = window.devicePixelRatio || 1, ctx = canvas.getContext('2d');
+      const w = rect.width, h = rect.height, center = {x:w / 2, y:h / 2 + 7};
+      const toRad = degrees => number(degrees) * Math.PI / 180;
+      const yaw = toRad(latest.yaw), pitch = toRad(latest.pitch), roll = toRad(latest.roll);
+      const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
+
+      canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#fbfcfc'; ctx.fillRect(0, 0, w, h);
+
+      function rotate(vector) {
+        const x1 = vector[0], y1 = cr * vector[1] - sr * vector[2], z1 = sr * vector[1] + cr * vector[2];
+        const x2 = cp * x1 + sp * z1, y2 = y1, z2 = -sp * x1 + cp * z1;
+        return [cy * x2 - sy * y2, sy * x2 + cy * y2, z2];
+      }
+      function project(vector) {
+        const perspective = 1 / (1 - vector[2] * 0.22);
+        return {x:center.x + vector[0] * 82 * perspective, y:center.y - vector[1] * 82 * perspective, depth:vector[2]};
+      }
+      function line(from, to, color, width) {
+        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
+      }
+
+      ctx.strokeStyle = '#dce5e5'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(center.x, center.y, 112, 42, 0, 0, Math.PI * 2); ctx.stroke();
+      line({x:28,y:center.y},{x:w - 28,y:center.y},'#e6ecec',1);
+      line({x:center.x,y:38},{x:center.x,y:h - 28},'#e6ecec',1);
+
+      const axes = [
+        {name:'X', color:'#be3d35', vector:rotate([1,0,0])},
+        {name:'Y', color:'#0b7661', vector:rotate([0,1,0])},
+        {name:'Z', color:'#287c9f', vector:rotate([0,0,1])}
+      ].map(axis => ({...axis, point:project(axis.vector)})).sort((a,b) => a.point.depth - b.point.depth);
+      axes.forEach(axis => {
+        line(center, axis.point, axis.color, 4);
+        ctx.beginPath(); ctx.arc(axis.point.x, axis.point.y, 5, 0, Math.PI * 2); ctx.fillStyle = axis.color; ctx.fill();
+        ctx.fillStyle = axis.color; ctx.font = '600 13px Segoe UI'; ctx.textAlign = axis.point.x < center.x ? 'right' : 'left'; ctx.fillText(axis.name, axis.point.x + (axis.point.x < center.x ? -9 : 9), axis.point.y + 4);
+      });
+      ctx.beginPath(); ctx.arc(center.x, center.y, 8, 0, Math.PI * 2); ctx.fillStyle = '#17212b'; ctx.fill();
+      ctx.beginPath(); ctx.arc(center.x, center.y, 3, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.fillStyle = '#62717c'; ctx.font = '12px Segoe UI'; ctx.textAlign = 'center';
+      ctx.fillText('Yaw ' + format(latest.yaw,1) + '°   Pitch ' + format(latest.pitch,1) + '°   Roll ' + format(latest.roll,1) + '°', center.x, h - 12);
+    }
+    function drawAll() { drawChart('gyroChart',[{color:'#be3d35',get:s=>s.raw_gz},{color:'#0b7661',get:s=>s.gyro_z},{color:'#b86816',get:s=>s.bias_z}],'rad/s'); drawChart('attitudeChart',[{color:'#287c9f',get:s=>s.yaw},{color:'#7954a1',get:s=>s.pitch},{color:'#b86816',get:s=>s.roll}],'deg'); drawAxisView(); drawChart('gimbalChart',[{color:'#0b7661',get:s=>s.yaw_target},{color:'#287c9f',get:s=>s.yaw},{color:'#be3d35',get:s=>s.pitch_target},{color:'#7954a1',get:s=>s.pitch}],'deg'); drawChart('temperatureChart',[{color:'#be3d35',get:s=>s.temp},{color:'#287c9f',get:s=>s.mcu_temp},{color:'#0b7661',get:s=>s.bias_count/50}],'scaled'); }
+    el('select').addEventListener('click', choosePort); el('connect').addEventListener('click', () => connected ? disconnect() : connect()); el('clear').addEventListener('click', clearHistory);
+    el('captureStart').addEventListener('click', startCapture); el('captureStop').addEventListener('click', stopCapture);
+    el('captureDownload').addEventListener('click', downloadCapture); el('captureClear').addEventListener('click', () => { captureActive = false; yawCapture.length = 0; captureLast = null; updateCaptureStatus(); });
+    window.addEventListener('resize', drawAll); updateCaptureStatus(); drawAll();
+  </script>
+</body>
+</html>

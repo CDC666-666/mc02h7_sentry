@@ -1,0 +1,19 @@
+# Keil/EIDE generated output and local editor state
+**/MDK-ARM/build/
+**/MDK-ARM/COD_H7_Template/
+**/MDK-ARM/CtrBoard-H7_FDCAN/
+**/MDK-ARM/CtrBoard-H7_RS485/
+**/.eide/log/
+**/build/
+**/install/
+**/log/
+*.uvguix.*
+*.bak
+*.Bak
+JLinkLog.txt
+
+# Python and operating-system caches
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

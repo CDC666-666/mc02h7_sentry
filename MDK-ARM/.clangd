@@ -1,0 +1,7 @@
+CompileFlags:
+  Add:
+    - -isystemD:\Keil_v5\ARM\ARMCLANG/include
+    - -isystemD:\Keil_v5\ARM\ARMCLANG/include/libcxx
+  Remove: []
+  CompilationDatabase: ./build/COD_H7_Template
+  Compiler: D:\Keil_v5\ARM\ARMCLANG\bin\armclang.exe

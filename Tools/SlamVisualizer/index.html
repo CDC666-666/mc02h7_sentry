@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>H7 SLAM 高速调试</title>
+  <style>
+    :root { --ink:#17212b; --muted:#667780; --line:#d8e0e4; --bg:#f3f6f5; --card:#fff; --green:#08795b; --red:#b43a35; --blue:#247ba0; --orange:#b86816; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font:14px "Segoe UI",Arial,sans-serif; font-variant-numeric:tabular-nums; }
+    header { background:#fff; border-bottom:1px solid var(--line); } .bar,main { max-width:1300px; margin:auto; padding:14px 20px; } .bar { min-height:64px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+    h1 { margin:0 16px 0 0; font-size:19px; } button { border:1px solid #b9c6cb; border-radius:5px; background:#fff; padding:7px 12px; cursor:pointer; font:inherit; } button.primary { color:#fff; border-color:var(--green); background:var(--green); } button:disabled { color:#9aa5ac; background:#f7f8f8; cursor:default; }
+    #status { margin-left:auto; color:var(--muted); } .dot { width:9px; height:9px; display:inline-block; border-radius:50%; background:#9aa7ad; margin-right:6px; } .dot.on { background:#16a276; }
+    .notice { margin:0 0 14px; color:var(--muted); } .grid { display:grid; grid-template-columns:repeat(4,minmax(160px,1fr)); border:1px solid var(--line); background:var(--card); } .item { min-height:93px; padding:14px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); } .label { color:var(--muted); font-size:12px; } .value { margin-top:9px; font-size:25px; font-weight:650; } .unit { color:var(--muted); font-size:12px; font-weight:400; }
+    .panel { margin-top:14px; border:1px solid var(--line); background:var(--card); } .panel h2 { font-size:14px; margin:0; padding:12px 14px; border-bottom:1px solid var(--line); } .details { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; } .details div { padding:12px 14px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); color:var(--muted); } .details b { color:var(--ink); }
+    canvas { width:100%; height:330px; display:block; } .legend { padding:10px 14px; color:var(--muted); font-size:12px; } .x { color:var(--red); }.y { color:var(--green); }.z { color:var(--blue); }
+    @media (max-width:800px) { .grid { grid-template-columns:repeat(2,minmax(140px,1fr)); }.details { grid-template-columns:1fr; } #status { margin-left:0; width:100%; }.bar,main { padding-left:12px;padding-right:12px; } }
+  </style>
+</head>
+<body>
+  <header><div class="bar"><h1>H7 SLAM 高速调试</h1><button id="select">选择 UART10 串口</button><button id="connect" class="primary" disabled>连接</button><button id="zero">将当前位置设为零点</button><span id="status"><i id="dot" class="dot"></i>未选择串口</span></div></header>
+  <main>
+    <p class="notice">专用数据帧约 100 Hz。X 未变化时请先看“原始 X 计数”；Y 已按独立比例缩小十倍。</p>
+    <section class="grid">
+      <div class="item"><div class="label">模块状态</div><div class="value" id="online">等待</div></div>
+      <div class="item"><div class="label">实际刷新率</div><div class="value" id="hz">0 <span class="unit">Hz</span></div></div>
+      <div class="item"><div class="label">数据年龄</div><div class="value" id="age">-- <span class="unit">ms</span></div></div>
+      <div class="item"><div class="label">完整帧</div><div class="value" id="frames">0</div></div>
+      <div class="item"><div class="label">X（绝对 / 相对）</div><div class="value x" id="x">-- <span class="unit">m</span></div></div>
+      <div class="item"><div class="label">Y（绝对 / 相对，已 ÷10）</div><div class="value y" id="y">-- <span class="unit">m</span></div></div>
+      <div class="item"><div class="label">Z（绝对 / 相对）</div><div class="value z" id="z">-- <span class="unit">m</span></div></div>
+      <div class="item"><div class="label">姿态 Roll / Pitch / Yaw</div><div class="value" id="attitude">-- <span class="unit">deg</span></div></div>
+    </section>
+    <section class="panel"><h2>原始协议数据</h2><div class="details"><div>原始 X：<b id="xc">--</b> count</div><div>原始 Y：<b id="yc">--</b> count</div><div>原始 Z：<b id="zc">--</b> count</div><div>原始 Roll：<b id="rc">--</b> count</div><div>原始 Pitch：<b id="pc">--</b> count</div><div>原始 Yaw：<b id="yc_angle">--</b> count</div><div>格式错：<b id="fe">0</b></div><div>串口错：<b id="ue">0</b></div><div>接收溢出：<b id="ov">0</b></div></div></section>
+    <section class="panel"><h2>最近 20 秒位置变化</h2><div class="legend"><span class="x">● X</span>　<span class="y">● Y（已 ÷10）</span>　<span class="z">● Z</span>　单位：m，相对于连接后/手动设定的零点</div><canvas id="chart"></canvas></section>
+  </main>
+  <script>
+    const el=id=>document.getElementById(id), history=[], maxAgeMs=20000; let port,reader,connected=false,zero=null,latest=null,lastFrame=0,lastFrameTime=0,rate=0;
+    const fmt=(v,d=4)=>Number.isFinite(v)?v.toFixed(d):'--';
+    function status(s,on=false){el('status').innerHTML='<i id="dot" class="dot '+(on?'on':'')+'"></i>'+s;}
+    function parse(line){ const d={}; line.trim().split(',').forEach(p=>{const i=p.indexOf(':');if(i>0){const n=Number(p.slice(i+1));if(Number.isFinite(n))d[p.slice(0,i)]=n;}}); return d.slamdbg===1?d:null; }
+    function update(d){ latest=d; const now=performance.now(); if(d.frames!==lastFrame){if(lastFrameTime)rate=0.85*rate+0.15*(1000/(now-lastFrameTime));lastFrame=d.frames;lastFrameTime=now;} if(!zero)zero={x:d.x,y:d.y,z:d.z};
+      el('online').textContent=d.online?'在线':'离线'; el('online').style.color=d.online?'#08795b':'#b86816'; el('hz').innerHTML=fmt(rate,0)+' <span class="unit">Hz</span>'; el('age').innerHTML=Math.round(d.age)+' <span class="unit">ms</span>'; el('frames').textContent=Math.round(d.frames);
+      el('x').innerHTML=fmt(d.x)+' / '+fmt(d.x-zero.x)+' <span class="unit">m</span>'; el('y').innerHTML=fmt(d.y)+' / '+fmt(d.y-zero.y)+' <span class="unit">m</span>'; el('z').innerHTML=fmt(d.z)+' / '+fmt(d.z-zero.z)+' <span class="unit">m</span>'; el('attitude').innerHTML=fmt(d.roll,1)+' / '+fmt(d.pitch,1)+' / '+fmt(d.yaw,1)+' <span class="unit">deg</span>';
+      el('xc').textContent=Math.round(d.x_count);el('yc').textContent=Math.round(d.y_count);el('zc').textContent=Math.round(d.z_count);el('rc').textContent=Math.round(d.roll_count);el('pc').textContent=Math.round(d.pitch_count);el('yc_angle').textContent=Math.round(d.yaw_count);el('fe').textContent=Math.round(d.format_errors);el('ue').textContent=Math.round(d.uart_errors);el('ov').textContent=Math.round(d.overflow);
+      history.push({t:now,x:d.x-zero.x,y:d.y-zero.y,z:d.z-zero.z}); while(history.length&&now-history[0].t>maxAgeMs)history.shift(); draw(); }
+    function draw(){const c=el('chart'),r=c.getBoundingClientRect(),q=devicePixelRatio||1,ctx=c.getContext('2d'),w=r.width,h=r.height,p={l:58,r:16,t:16,b:28};c.width=Math.round(w*q);c.height=Math.round(h*q);ctx.setTransform(q,0,0,q,0,0);ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);if(!history.length)return;const vals=history.flatMap(s=>[s.x,s.y,s.z]);let lo=Math.min(...vals),hi=Math.max(...vals);if(hi-lo<0.0001){lo-=0.01;hi+=0.01;}const m=(hi-lo)*.1;lo-=m;hi+=m;ctx.font='11px Segoe UI';ctx.strokeStyle='#e1e8e9';ctx.fillStyle='#667780';ctx.textAlign='right';for(let i=0;i<5;i++){const yy=p.t+(h-p.t-p.b)*i/4,v=hi-(hi-lo)*i/4;ctx.beginPath();ctx.moveTo(p.l,yy);ctx.lineTo(w-p.r,yy);ctx.stroke();ctx.fillText(v.toFixed(3),p.l-6,yy+4);}const t0=history[0].t,t1=history[history.length-1].t||t0+1;[['x','#b43a35'],['y','#08795b'],['z','#247ba0']].forEach(([key,color])=>{ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=1.6;history.forEach((s,i)=>{const xx=p.l+(w-p.l-p.r)*(s.t-t0)/(t1-t0),yy=p.t+(h-p.t-p.b)*(hi-s[key])/(hi-lo);i?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);});ctx.stroke();});ctx.textAlign='right';ctx.fillText(((t1-t0)/1000).toFixed(1)+' s',w-p.r,h-8);}
+    async function choose(){try{port=await navigator.serial.requestPort();el('connect').disabled=false;status('已选择串口');}catch(_){status('未选择串口');}}
+    async function connect(){if(!port)return;try{await port.open({baudRate:921600});connected=true;el('connect').textContent='断开';status('已连接 UART10（921600）',true);read();}catch(e){status('打开失败：'+e.message);}}
+    async function disconnect(){connected=false;if(reader)try{await reader.cancel();}catch(_){}if(port&&port.readable)try{await port.close();}catch(_){}reader=null;el('connect').textContent='连接';status('已断开');}
+    async function read(){const dec=new TextDecoder();let pending='';try{while(connected&&port.readable){reader=port.readable.getReader();try{while(connected){const {value,done}=await reader.read();if(done)break;pending+=dec.decode(value,{stream:true});const lines=pending.split(/\r?\n/);pending=lines.pop();lines.forEach(s=>{const d=parse(s);if(d)update(d);});}}finally{reader.releaseLock();reader=null;}}}catch(e){if(connected)status('读取失败：'+e.message);}if(connected)disconnect();}
+    el('select').onclick=choose;el('connect').onclick=()=>connected?disconnect():connect();el('zero').onclick=()=>{if(latest){zero={x:latest.x,y:latest.y,z:latest.z};history.length=0;draw();}};addEventListener('resize',draw);
+  </script>
+</body>
+</html>

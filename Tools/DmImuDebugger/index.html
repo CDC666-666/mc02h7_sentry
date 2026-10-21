@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DM-IMU-L1 CAN3 调试器</title>
+  <style>
+    :root{color-scheme:light;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#16252f;background:#eef3f5}
+    body{margin:0;padding:22px;max-width:1420px;margin:auto}.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    h1{font-size:23px;margin:0 auto 0 0}.sub{color:#59707c;font-size:13px}.status{font-weight:700;color:#a5482f}.status.on{color:#0a846d}
+    button{border:0;border-radius:7px;padding:9px 14px;background:#167a8c;color:white;font-weight:650;cursor:pointer}button:disabled{background:#9caeb4;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:12px;margin-top:16px}.card{background:white;border:1px solid #dce6e9;border-radius:10px;padding:13px;box-shadow:0 1px 2px #b8c7cc40}
+    .wide{grid-column:span 2}.title{font-size:12px;color:#607580;text-transform:uppercase;letter-spacing:.04em}.value{font-weight:750;font-size:23px;margin-top:5px}.small{font-size:13px;line-height:1.6;color:#36505d;word-break:break-all}
+    canvas{width:100%;height:240px}.raw{font:13px ui-monospace,Consolas,monospace;white-space:pre-wrap;min-height:42px}.note{margin:15px 0 0;color:#536a75;font-size:13px}
+    @media(max-width:850px){body{padding:13px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wide{grid-column:span 2}.value{font-size:19px}}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1>DM-IMU-L1 · CAN3 专用调试器</h1><span id="status" class="status">未选择串口</span>
+    <button id="choose">选择 Type-C 串口</button><button id="connect" disabled>连接</button><button id="record">开始采样</button><button id="export" disabled>导出 CSV</button><button id="clear">清空曲线</button>
+  </div>
+  <div class="note">此页显示 CAN3 请求与回包。DM-IMU-L1 仅用于通信测试，不参与云台闭环。</div>
+  <section class="grid">
+    <div class="card"><div class="title">接收频率</div><div class="value" id="hz">-- Hz</div><div class="small" id="frames">0 frames · 0 bytes</div></div>
+    <div class="card"><div class="title">CAN / 在线状态</div><div class="value" id="online">--</div><div class="small" id="can">CAN -- · RX ID --</div></div>
+    <div class="card"><div class="title">数据帧 / 年龄</div><div class="value" id="frame">--</div><div class="small" id="age">Age -- ms · invalid --</div></div>
+    <div class="card"><div class="title">温度</div><div class="value" id="temp">-- °C</div><div class="small" id="mask">Frame mask --</div></div>
+    <div class="card"><div class="title">温漂采样</div><div class="value" id="recordState">未采样</div><div class="small" id="recordInfo">0 samples</div></div>
+    <div class="card wide"><div class="title">最近 H7 请求帧</div><div id="txraw" class="raw">等待 H7 CAN3 请求</div></div>
+    <div class="card wide"><div class="title">姿态角（度）</div><div class="value" id="angle">Pitch -- · Yaw -- · Roll --</div><canvas id="anglePlot"></canvas></div>
+    <div class="card wide"><div class="title">角速度（rad/s）</div><div class="value" id="gyro">X -- · Y -- · Z --</div><canvas id="gyroPlot"></canvas></div>
+    <div class="card wide"><div class="title">加速度（m/s²）</div><div class="value" id="accel">X -- · Y -- · Z --</div><canvas id="accelPlot"></canvas></div>
+    <div class="card wide"><div class="title">四元数</div><div class="value" id="quat">W -- · X -- · Y -- · Z --</div><div class="small">用于检查姿态数据是否连续；不对其进行坐标转换。</div></div>
+    <div class="card wide"><div class="title">最近一帧原始 CAN 数据</div><div id="raw" class="raw">等待 DM-IMU-L1 数据</div></div>
+  </section>
+<script>
+(() => {
+  const $ = id => document.getElementById(id), number = (v,d=3) => Number.isFinite(v) ? v.toFixed(d) : '--';
+  let port=null, reader=null, connected=false, pending='', samples=[], count=0, bytes=0, windowCount=0, windowStart=0, latest={}, recording=false, records=[];
+  const colors=['#137c8b','#d15b35','#7559a6'];
+  function status(text,on=false){$('status').textContent=text;$('status').className='status'+(on?' on':'')}
+  function parse(line){const d={};line.split(',').forEach(x=>{const i=x.indexOf(':');if(i>0){const v=Number(x.slice(i+1));if(Number.isFinite(v))d[x.slice(0,i).trim()]=v}});return d.dmimu===1?d:null}
+  function update(d){latest={...latest,...d};count++;windowCount++;bytes+=d._bytes||0;const now=performance.now();if(!windowStart)windowStart=now;const span=(now-windowStart)/1000;const hz=span>0?windowCount/span:0;if(span>=1){windowStart=now;windowCount=0}$('hz').textContent=hz.toFixed(1)+' Hz';$('frames').textContent=count+' frames · '+bytes+' bytes';
+    const online=latest.online===1;$('online').textContent=online?'ONLINE':'OFFLINE';$('online').style.color=online?'#0a846d':'#a5482f';$('can').textContent='CAN '+latest.can+' · IMU RX 0x'+Math.round(latest.rx_id||0).toString(16).toUpperCase()+' · Bus '+Math.round(latest.bus_rx||0)+' · Last 0x'+Math.round(latest.bus_last_id||0).toString(16).toUpperCase()+' · Req '+Math.round(latest.req_tx||0)+' / reject '+Math.round(latest.req_reject||0)+' · TEC '+Math.round(latest.can_tec||0)+' REC '+Math.round(latest.can_rec||0)+' LEC '+Math.round(latest.can_lec||0)+' ACT '+Math.round(latest.can_activity||0)+' EP '+Math.round(latest.can_ep||0)+' BO '+Math.round(latest.can_busoff||0);$('frame').textContent=Math.round(latest.frames||0)+' frames';$('age').textContent='Age '+Math.round(latest.age||0)+' ms · invalid '+Math.round(latest.invalid||0);$('temp').textContent=number(latest.temp,2)+' °C';$('mask').textContent='Frame mask 0x'+Math.round(latest.mask||0).toString(16).toUpperCase()+' · type 0x'+Math.round(latest.type||0).toString(16).toUpperCase();
+    $('recordState').textContent=recording?'采样中':'未采样';$('recordState').style.color=recording?'#0a846d':'#263842';$('recordInfo').textContent=records.length+' samples';
+    $('angle').textContent='Pitch '+number(latest.pitch)+' · Yaw '+number(latest.yaw)+' · Roll '+number(latest.roll);$('gyro').textContent='X '+number(latest.gx,4)+' · Y '+number(latest.gy,4)+' · Z '+number(latest.gz,4);$('accel').textContent='X '+number(latest.ax)+' · Y '+number(latest.ay)+' · Z '+number(latest.az);$('quat').textContent='W '+number(latest.qw,5)+' · X '+number(latest.qx,5)+' · Y '+number(latest.qy,5)+' · Z '+number(latest.qz,5);
+    $('txraw').textContent=[0,1,2,3,4,5,6,7].map(i=>('0'+Math.round(latest['tx'+i]||0).toString(16)).slice(-2).toUpperCase()).join(' ')+'    CAN ID: 0x'+Math.round(latest.tx_id||0).toString(16).toUpperCase();
+    $('raw').textContent=[0,1,2,3,4,5,6,7].map(i=>('0'+Math.round(latest['raw'+i]||0).toString(16)).slice(-2).toUpperCase()).join(' ')+'    CAN ID: 0x'+Math.round(latest.rx_id||0).toString(16).toUpperCase();
+    samples.push({...latest});if(samples.length>500)samples.shift();if(recording){records.push({host_time:new Date().toISOString(),mcu_time:latest.t,temp_c:latest.temp,pitch_deg:latest.pitch,yaw_deg:latest.yaw,roll_deg:latest.roll,gx_rad_s:latest.gx,gy_rad_s:latest.gy,gz_rad_s:latest.gz,ax_mps2:latest.ax,ay_mps2:latest.ay,az_mps2:latest.az});$('export').disabled=false}plot('anglePlot',[['pitch','Pitch'],['yaw','Yaw'],['roll','Roll']]);plot('gyroPlot',[['gx','X'],['gy','Y'],['gz','Z']]);plot('accelPlot',[['ax','X'],['ay','Y'],['az','Z']]);}
+  function plot(id,keys){const c=$(id),r=c.getBoundingClientRect(),q=devicePixelRatio||1,w=r.width,h=r.height;c.width=w*q;c.height=h*q;const x=c.getContext('2d');x.setTransform(q,0,0,q,0,0);x.clearRect(0,0,w,h);if(!samples.length)return;let all=[];samples.forEach(s=>keys.forEach(k=>all.push(s[k[0]])));let lo=Math.min(...all),hi=Math.max(...all);if(!Number.isFinite(lo))return;if(hi-lo<.001){lo-=.5;hi+=.5}const m=(hi-lo)*.15;lo-=m;hi+=m;x.strokeStyle='#d9e3e6';x.beginPath();x.moveTo(42,h/2);x.lineTo(w-8,h/2);x.stroke();keys.forEach((k,n)=>{x.strokeStyle=colors[n];x.lineWidth=1.4;x.beginPath();samples.forEach((s,i)=>{const px=42+(w-52)*i/Math.max(1,samples.length-1),py=12+(h-28)*(hi-s[k[0]])/(hi-lo);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();x.fillStyle=colors[n];x.fillText(k[1],44+n*52,12)});x.fillStyle='#627681';x.fillText(hi.toFixed(2),2,16);x.fillText(lo.toFixed(2),2,h-10)}
+  async function read(){const dec=new TextDecoder();try{while(connected&&port.readable){reader=port.readable.getReader();try{while(connected){const {value,done}=await reader.read();if(done)break;pending+=dec.decode(value,{stream:true});const lines=pending.split(/\r?\n/);pending=lines.pop();lines.forEach(l=>{const d=parse(l);if(d){d._bytes=l.length+2;update(d)}})}}finally{reader.releaseLock();reader=null}}}catch(e){if(connected)status('读取失败：'+e.message)}if(connected)disconnect()}
+  async function disconnect(){connected=false;if(reader)try{await reader.cancel()}catch(_){};if(port&&port.readable)try{await port.close()}catch(_){};$('connect').textContent='连接';status('已断开')}
+  $('choose').onclick=async()=>{try{port=await navigator.serial.requestPort();$('connect').disabled=false;status('已选择 Type-C 串口')}catch(_){}};
+  $('connect').onclick=async()=>{if(connected)return disconnect();try{await port.open({baudRate:921600});connected=true;pending='';windowStart=performance.now();windowCount=0;$('connect').textContent='断开';status('已连接，等待 DM-IMU-L1 数据',true);read()}catch(e){status('打开失败：'+e.message)}};
+  $('record').onclick=()=>{recording=!recording;$('record').textContent=recording?'停止采样':'开始采样';if(recording){records=[];$('export').disabled=true}};
+  $('export').onclick=()=>{if(!records.length)return;const keys=Object.keys(records[0]),csv=[keys.join(','),...records.map(row=>keys.map(k=>row[k]).join(','))].join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='dm_imu_temperature_'+new Date().toISOString().replace(/[:.]/g,'-')+'.csv';a.click();URL.revokeObjectURL(url)};
+  $('clear').onclick=()=>{samples=[];count=0;bytes=0;['anglePlot','gyroPlot','accelPlot'].forEach(id=>plot(id,[]))};
+  if(!('serial' in navigator)){status('请用 Chrome 或 Edge 打开 localhost 页面')}
+})();
+</script>
+</body></html>
