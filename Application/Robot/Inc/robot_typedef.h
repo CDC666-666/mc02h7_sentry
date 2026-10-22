@@ -26,9 +26,7 @@
 #define GIMBAL_ONLY        1U
 #define CHASSIS_AND_GIMBAL 2U
 
-/* 遥控器类型：与 F407 StandardRobotpp 的选型名称保持一致。
- * DT7 使用 18 字节 DJI DBUS，不是标准 SBUS，当前 H7 的 UART5 接收链路
- * 只支持下列三个 25 字节 SBUS 遥控器。 */
+/* 遥控器类型：DT7/DR16 使用 18 字节 DJI DBUS，其余三种使用 25 字节 SBUS。 */
 #define RC_DT7      0U
 #define RC_AT9S_PRO 1U
 #define RC_HT8A     2U

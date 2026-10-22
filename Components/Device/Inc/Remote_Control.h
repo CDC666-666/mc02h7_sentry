@@ -30,6 +30,9 @@
  */
 /* ET08A through its ELRS receiver uses a standard 25-byte SBUS frame. */
 #define SBUS_RX_BUF_NUM        25U
+#define DBUS_RX_BUF_NUM        18U
+/* Keep each DMA buffer on its own cache line. */
+#define REMOTE_RX_DMA_BUF_NUM  32U
 #define SBUS_CHANNEL_COUNT     16U
 #define SBUS_FRAME_START       0x0FU
 #define SBUS_FRAME_END         0x00U
@@ -196,13 +199,26 @@ extern Remote_Info_Typedef remote_ctrl;
 /**
  * @brief remote control usart RxDMA MultiBuffer
  */
-extern uint8_t SBUS_MultiRx_Buf[2][SBUS_RX_BUF_NUM];
+extern uint8_t SBUS_MultiRx_Buf[2][REMOTE_RX_DMA_BUF_NUM];
 
-/* ET08A/ELRS receive diagnostics for the debugger watch window. */
+/* SBUS diagnostics. The frame/error counters are also the legacy USB telemetry
+ * fields and count the selected RC protocol when DT7 is active. */
 extern volatile uint16_t remote_sbus_channels[SBUS_CHANNEL_COUNT];
 extern volatile uint8_t remote_sbus_flags;
 extern volatile uint32_t remote_sbus_frame_count;
 extern volatile uint32_t remote_sbus_error_count;
+/* DT7/DR16 diagnostics for the debugger watch window. */
+extern volatile uint8_t remote_dbus_last_frame[DBUS_RX_BUF_NUM];
+extern volatile uint16_t remote_dbus_channels[4];
+extern volatile uint8_t remote_dbus_switches[2];
+extern volatile uint32_t remote_dbus_frame_count;
+extern volatile uint32_t remote_dbus_error_count;
+extern volatile uint32_t remote_rx_event_count;
+extern volatile uint32_t remote_rx_length_error_count;
+extern volatile uint16_t remote_last_rx_size;
+extern volatile uint32_t remote_uart_error_count;
+extern volatile uint32_t remote_uart_last_error;
+extern volatile uint32_t remote_rx_start_error_count;
 
 /* Mouse Exported defines -----------------------------------------------------*/
 #define MOUSE_X_MOVE_SPEED    (remote_ctrl.mouse.x )
@@ -234,6 +250,7 @@ extern volatile uint32_t remote_sbus_error_count;
   * @brief  convert the remote control received message
   */
 extern void SBUS_TO_RC(volatile const uint8_t *sbus_buf, Remote_Info_Typedef *remote_ctrl);
+extern void DBUS_TO_RC(volatile const uint8_t *dbus_buf, Remote_Info_Typedef *remote_ctrl);
 /**
   * @brief  clear the remote control data while the device offline
   */

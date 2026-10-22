@@ -224,8 +224,8 @@ void ChassisReference(void)
                     chassis.velocity_pid[i].PID_Calc_Clear(&chassis.velocity_pid[i]);
                 }
             } else {
-                chassis.reference.wz = PID_Calculate(&chassis.gimbal_follow_pid,
-                                                     0.0f, gimbal_heading);
+                chassis.reference.wz = -PID_Calculate(&chassis.gimbal_follow_pid,
+                                                      0.0f, gimbal_heading);
             }
             chassis_spin_active = spin_requested;
         }

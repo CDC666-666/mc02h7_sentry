@@ -106,11 +106,11 @@
 #define MAX_IOUT_CHASSIS_FOLLOW_GIMBAL (0.0f)
 #define MAX_OUT_CHASSIS_FOLLOW_GIMBAL  (2.0f)
 
-/* 遥控器选型：与 F407 的 __RC_TYPE 分层方式一致。
- * UART5 当前配置为 100 kbit/s、8E2、25 字节标准 SBUS，支持 ET08A、
- * AT9S PRO 和 HT8A。DT7 使用 18 字节 DJI DBUS，不能只改这个宏就使用。 */
+/* 遥控器选型：只改此宏即可切换 UART5 帧格式、DMA 长度和解码器。
+ * DT7/DR16 为 100 kbit/s、8E1、18 字节 DBUS；其他型号为
+ * 100 kbit/s、8E2、25 字节 SBUS。MC-02 的 P6 已有反相电路。 */
 #ifndef __RC_TYPE
-#define __RC_TYPE RC_ET08A
+#define __RC_TYPE RC_DT7
 #endif
 #define RC_TYPE __RC_TYPE
 
@@ -127,7 +127,7 @@
 #define GIMBAL_CAN   1U
 #define GIMBAL_STDID 0x1FFU
 
-/* ET08A 通道映射：Ch5（Aux1/SB）对应 s[1]，Ch6（Aux2/SC）对应 s[0]。 */
+/* 模式开关使用 s[0]；DT7 对应 S1，ET08A 对应 Ch6（Aux2/SC）。 */
 #define GIMBAL_RC_MODE_SWITCH           0U
 #define GIMBAL_RC_YAW_CHANNEL           0U
 #define GIMBAL_RC_PITCH_CHANNEL         1U

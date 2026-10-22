@@ -15,6 +15,7 @@
 #include "bsp_uart.h"
 #include "usart.h"
 #include "remote_control.h"
+#include "robot_param.h"
 #include "Referee_System.h"
 #include "slam.h"
 
@@ -62,7 +63,7 @@ static void USER_USART2_RxHandler(UART_HandleTypeDef *huart,uint16_t Size);
 static void USER_USART3_RxHandler(UART_HandleTypeDef *huart,uint16_t Size);
 
 static void USART_RxDMA_MultiBuffer_Init(UART_HandleTypeDef *, uint32_t *, uint32_t *, uint32_t );
-static void USART5_SbusRx_Init(void);
+static void USART5_RemoteRx_Init(void);
 static HAL_StatusTypeDef UART7_SlamRx_Init(void);
 
 
@@ -76,16 +77,24 @@ void BSP_USART_Init(void){
 		
 	USART_RxDMA_MultiBuffer_Init(&huart1,(uint32_t *)Referee_System_Info_MultiRx_Buf[0],(uint32_t *)Referee_System_Info_MultiRx_Buf[1],REFEREE_RXFRAME_LENGTH);
 
-	USART5_SbusRx_Init();
+	USART5_RemoteRx_Init();
 	Slam_Init();
 	UART7_SlamRx_Init();
 
 }
 
-static void USART5_SbusRx_Init(void)
+static void USART5_RemoteRx_Init(void)
 {
-  (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart5, SBUS_MultiRx_Buf[0], SBUS_RX_BUF_NUM);
-  __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+#if (__RC_TYPE == RC_DT7)
+  const uint16_t frame_length = DBUS_RX_BUF_NUM;
+#else
+  const uint16_t frame_length = SBUS_RX_BUF_NUM;
+#endif
+  if (HAL_UARTEx_ReceiveToIdle_DMA(&huart5, SBUS_MultiRx_Buf[0], frame_length) == HAL_OK) {
+    __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+  } else {
+    remote_rx_start_error_count++;
+  }
 }
 
 static HAL_StatusTypeDef UART7_SlamRx_Init(void)
@@ -99,9 +108,16 @@ static HAL_StatusTypeDef UART7_SlamRx_Init(void)
   return status;
 }
 
-/* UART7 线路噪声、断线或错误电平后，立即恢复下一帧接收。 */
+/* UART5 遥控器和 UART7 SLAM 在串口错误后重新启动接收。 */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
+  if (huart == &huart5) {
+    remote_uart_last_error = huart->ErrorCode;
+    remote_uart_error_count++;
+    (void)HAL_UART_AbortReceive(huart);
+    USART5_RemoteRx_Init();
+    return;
+  }
   if (huart == &huart7) {
     Slam_OnUartError();
     (void)HAL_UART_AbortReceive(huart);
@@ -157,7 +173,7 @@ static void USART_RxDMA_MultiBuffer_Init(UART_HandleTypeDef *huart, uint32_t *Ds
 
 
 /**
-  * @brief  USER USART5 Reception Event Callback.(SBUS remote_ctrl)
+  * @brief  USER USART5 Reception Event Callback (selected RC protocol)
   * @param  huart UART handle
   * @param  Size  Number of data available in application reception buffer (indicates a position in
   *               reception buffer until which, data are available)
@@ -165,11 +181,24 @@ static void USART_RxDMA_MultiBuffer_Init(UART_HandleTypeDef *huart, uint32_t *Ds
   */
 static void USER_USART5_RxHandler(UART_HandleTypeDef *huart,uint16_t Size){
   (void)huart;
-  if (Size == SBUS_RX_BUF_NUM) {
-    SCB_InvalidateDCache_by_Addr((uint32_t *)SBUS_MultiRx_Buf[0], 32U);
-    SBUS_TO_RC(SBUS_MultiRx_Buf[0], &remote_ctrl);
+  remote_rx_event_count++;
+  remote_last_rx_size = Size;
+#if (__RC_TYPE == RC_DT7)
+  if (Size == DBUS_RX_BUF_NUM) {
+    SCB_InvalidateDCache_by_Addr((uint32_t *)SBUS_MultiRx_Buf[0], REMOTE_RX_DMA_BUF_NUM);
+    DBUS_TO_RC(SBUS_MultiRx_Buf[0], &remote_ctrl);
+  } else {
+    remote_rx_length_error_count++;
   }
-  USART5_SbusRx_Init();
+#else
+  if (Size == SBUS_RX_BUF_NUM) {
+    SCB_InvalidateDCache_by_Addr((uint32_t *)SBUS_MultiRx_Buf[0], REMOTE_RX_DMA_BUF_NUM);
+    SBUS_TO_RC(SBUS_MultiRx_Buf[0], &remote_ctrl);
+  } else {
+    remote_rx_length_error_count++;
+  }
+#endif
+  USART5_RemoteRx_Init();
 }
 
 /**

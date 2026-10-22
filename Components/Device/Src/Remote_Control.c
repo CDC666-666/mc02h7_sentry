@@ -19,11 +19,22 @@ volatile uint16_t remote_sbus_channels[SBUS_CHANNEL_COUNT] = {0U};
 volatile uint8_t remote_sbus_flags = 0U;
 volatile uint32_t remote_sbus_frame_count = 0U;
 volatile uint32_t remote_sbus_error_count = 0U;
+volatile uint8_t remote_dbus_last_frame[DBUS_RX_BUF_NUM] = {0U};
+volatile uint16_t remote_dbus_channels[4] = {0U};
+volatile uint8_t remote_dbus_switches[2] = {0U};
+volatile uint32_t remote_dbus_frame_count = 0U;
+volatile uint32_t remote_dbus_error_count = 0U;
+volatile uint32_t remote_rx_event_count = 0U;
+volatile uint32_t remote_rx_length_error_count = 0U;
+volatile uint16_t remote_last_rx_size = 0U;
+volatile uint32_t remote_uart_error_count = 0U;
+volatile uint32_t remote_uart_last_error = 0U;
+volatile uint32_t remote_rx_start_error_count = 0U;
 
 /**
  * @brief remote control usart RxDMA MultiBuffer
  */
-__attribute__((section (".AXI_SRAM"), aligned(32))) uint8_t SBUS_MultiRx_Buf[2][SBUS_RX_BUF_NUM];
+__attribute__((section (".AXI_SRAM"), aligned(32))) uint8_t SBUS_MultiRx_Buf[2][REMOTE_RX_DMA_BUF_NUM];
  
 /* Private variables ---------------------------------------------------------*/
 /**
@@ -44,6 +55,7 @@ static void Key_Status_Update(KeyBoard_Info_Typedef *KeyInfo,bool KeyBoard_Statu
   *         contains the information  for the remote control.
   * @retval none
   */
+#if (__RC_TYPE != RC_DT7)
 static uint16_t SbusReadChannel(const uint8_t *frame, uint8_t channel)
 {
     const uint8_t *data = &frame[1];
@@ -145,6 +157,69 @@ void SBUS_TO_RC(volatile const uint8_t *sbus_buf, Remote_Info_Typedef *remote)
     remote->online_cnt = 0xFAU;
     remote->rc_lost = false;
 }
+#endif /* SBUS remote */
+
+#if (__RC_TYPE == RC_DT7)
+void DBUS_TO_RC(volatile const uint8_t *dbus_buf, Remote_Info_Typedef *remote)
+{
+    const uint8_t *frame = (const uint8_t *)dbus_buf;
+    uint16_t channel[4];
+    uint8_t switch_left;
+    uint8_t switch_right;
+
+    if (frame == NULL || remote == NULL) return;
+    /* Retain even a malformed 18-byte frame for debugger inspection. */
+    for (uint8_t i = 0U; i < DBUS_RX_BUF_NUM; i++) remote_dbus_last_frame[i] = frame[i];
+
+    /* DJI DBUS has no frame header or checksum. Validate every channel before
+     * publishing the frame and refreshing the receiver-online timer. */
+    channel[0] = (uint16_t)(((uint16_t)frame[0] | ((uint16_t)frame[1] << 8U)) & 0x07FFU);
+    channel[1] = (uint16_t)((((uint16_t)frame[1] >> 3U) | ((uint16_t)frame[2] << 5U)) & 0x07FFU);
+    channel[2] = (uint16_t)((((uint16_t)frame[2] >> 6U) | ((uint16_t)frame[3] << 2U) |
+                             ((uint16_t)frame[4] << 10U)) & 0x07FFU);
+    channel[3] = (uint16_t)((((uint16_t)frame[4] >> 1U) | ((uint16_t)frame[5] << 7U)) & 0x07FFU);
+    switch_left = (uint8_t)((frame[5] >> 4U) & 0x03U);
+    switch_right = (uint8_t)((frame[5] >> 6U) & 0x03U);
+
+    for (uint8_t i = 0U; i < 4U; i++) {
+        if (channel[i] < 364U || channel[i] > 1684U) {
+            remote_dbus_error_count++;
+            remote_sbus_error_count++; /* Legacy telemetry field: active RC errors. */
+            return;
+        }
+    }
+    if (switch_left < RC_SW_UP || switch_left > RC_SW_MID ||
+        switch_right < RC_SW_UP || switch_right > RC_SW_MID) {
+        remote_dbus_error_count++;
+        remote_sbus_error_count++;
+        return;
+    }
+
+    for (uint8_t i = 0U; i < 4U; i++) remote_dbus_channels[i] = channel[i];
+    remote_dbus_switches[0] = switch_left;
+    remote_dbus_switches[1] = switch_right;
+
+    remote->rc.ch[0] = (int16_t)channel[0] - (int16_t)RC_CH_VALUE_OFFSET;
+    remote->rc.ch[1] = (int16_t)channel[1] - (int16_t)RC_CH_VALUE_OFFSET;
+    /* Keep the H7 chassis convention: ch[2] is forward, ch[3] is lateral. */
+    remote->rc.ch[2] = (int16_t)channel[3] - (int16_t)RC_CH_VALUE_OFFSET;
+    remote->rc.ch[3] = (int16_t)channel[2] - (int16_t)RC_CH_VALUE_OFFSET;
+    remote->rc.ch[4] = 0; /* DBUS bytes 16-17 are reserved, not a fifth stick. */
+    remote->rc.s[0] = switch_left;
+    remote->rc.s[1] = switch_right;
+    remote->mouse.x = (int16_t)((uint16_t)frame[6] | ((uint16_t)frame[7] << 8U));
+    remote->mouse.y = (int16_t)((uint16_t)frame[8] | ((uint16_t)frame[9] << 8U));
+    remote->mouse.z = (int16_t)((uint16_t)frame[10] | ((uint16_t)frame[11] << 8U));
+    remote->mouse.press_l = frame[12];
+    remote->mouse.press_r = frame[13];
+    remote->key.v = (uint16_t)frame[14] | ((uint16_t)frame[15] << 8U);
+
+    remote_dbus_frame_count++;
+    remote_sbus_frame_count++; /* Legacy telemetry field: active RC frames. */
+    remote->online_cnt = 0xFAU;
+    remote->rc_lost = false;
+}
+#endif /* DT7 DBUS remote */
 //------------------------------------------------------------------------------
 
 /**
