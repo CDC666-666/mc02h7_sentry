@@ -49,6 +49,7 @@ extern volatile uint8_t INS_ImuReady;
 extern volatile uint16_t INS_GyroBiasSampleCount;
 extern volatile float INS_GyroRaw[3];
 extern volatile float INS_GyroBias[3];
+extern volatile float INS_UpdatePeriodS;
 
 uint8_t INS_IsImuReady(void);
 

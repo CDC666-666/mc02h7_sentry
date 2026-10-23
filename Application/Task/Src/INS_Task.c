@@ -13,12 +13,14 @@
 #include <math.h>
 
 #define IMU_UPDATE_PERIOD_S (0.001f)
+#define IMU_MAX_UPDATE_PERIOD_S (0.020f)
 
 INS_Info_Typedef INS_Info;
 volatile uint8_t INS_ImuReady;
 volatile uint16_t INS_GyroBiasSampleCount;
 volatile float INS_GyroRaw[3];
 volatile float INS_GyroBias[3];
+volatile float INS_UpdatePeriodS = IMU_UPDATE_PERIOD_S;
 
 /* This is the raw BMI088-to-IMU rotation used by StandardRobotpp. The second
  * matrix is profile-owned because it depends on how the H723 board is mounted. */
@@ -87,7 +89,7 @@ static float imu_gyro_bias_sum[3];
 
 static void INS_Task_Init(void);
 static void IMU_Rotate(const float source[3], float destination[3]);
-static void GravityEKF_Update(const float gyro[3], const float accel[3]);
+static void GravityEKF_Update(const float gyro[3], const float accel[3], float dt);
 static void BMI088_Temp_Control(float temperature);
 static void INS_GyroBiasUpdate(const float gyro[3], const float accel[3]);
 static uint8_t INS_IsStationary(const float gyro[3], const float accel[3]);
@@ -99,13 +101,23 @@ uint8_t INS_IsImuReady(void)
 
 void INS_Task(void const *argument)
 {
+    uint32_t last_update_cycles = 0U;
+    uint8_t have_last_update_cycles = 0U;
     (void)argument;
     /* 强实现覆盖了 freertos.c 的弱任务，必须在此初始化 Type-C USB CDC。 */
     INS_Task_Init();
+    /* Gyro DMA may complete more than once per millisecond (DRDY and timeout
+     * requests). Measure the elapsed time instead of integrating 1 ms/frame. */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    if ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) == 0U) {
+        DWT->CYCCNT = 0U;
+        DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    }
     BMI088_DMA_Start((BMI088_TaskHandle_t)xTaskGetCurrentTaskHandle());
 
     for (;;) {
         float corrected_gyro[3];
+        float update_period_s = IMU_UPDATE_PERIOD_S;
 
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1U)) == 0U) {
             /* Keep the IMU alive even when the board's DRDY EXTI is not wired
@@ -113,6 +125,21 @@ void INS_Task(void const *argument)
              * preferred and this request is ignored while DMA is busy. */
             BMI088_DMA_RequestGyro();
             continue;
+        }
+
+        {
+            const uint32_t now_cycles = DWT->CYCCNT;
+            if (have_last_update_cycles != 0U && SystemCoreClock != 0U) {
+                update_period_s = (float)(uint32_t)(now_cycles - last_update_cycles) /
+                                  (float)SystemCoreClock;
+                if (update_period_s <= 0.0f ||
+                    update_period_s > IMU_MAX_UPDATE_PERIOD_S) {
+                    update_period_s = IMU_UPDATE_PERIOD_S;
+                }
+            }
+            last_update_cycles = now_cycles;
+            have_last_update_cycles = 1U;
+            INS_UpdatePeriodS = update_period_s;
         }
 
         /* The DMA callback has completed and decoded the latest BMI088 frame. */
@@ -131,9 +158,9 @@ void INS_Task(void const *argument)
         corrected_gyro[2] = INS_Info.Gyro[2] - INS_GyroBias[2];
         memcpy(INS_Info.Gyro, corrected_gyro, sizeof(corrected_gyro));
 
-        GravityEKF_Update(corrected_gyro, INS_Info.Accel);
+        GravityEKF_Update(corrected_gyro, INS_Info.Accel, update_period_s);
         if (Quaternion_Info.QuaternionEKF.Initialized) {
-            QuaternionEKF_Update(&Quaternion_Info, corrected_gyro, gravity_vector, IMU_UPDATE_PERIOD_S);
+            QuaternionEKF_Update(&Quaternion_Info, corrected_gyro, gravity_vector, update_period_s);
         }
 
         memcpy(INS_Info.Angle, Quaternion_Info.EulerAngle, sizeof(INS_Info.Angle));
@@ -185,6 +212,7 @@ static void INS_Task_Init(void)
     INS_GyroBias[0] = 0.0f;
     INS_GyroBias[1] = 0.0f;
     INS_GyroBias[2] = 0.0f;
+    INS_UpdatePeriodS = IMU_UPDATE_PERIOD_S;
     imu_temp_stable = 0U;
     imu_temp_stable_count = 0U;
     imu_gyro_bias_captured = 0U;
@@ -213,7 +241,7 @@ static void IMU_Rotate(const float source[3], float destination[3])
     }
 }
 
-static void GravityEKF_Update(const float gyro[3], const float accel[3])
+static void GravityEKF_Update(const float gyro[3], const float accel[3], float dt)
 {
 	if (!gravity_kf.Initialized) {
 		gravity_vector[0] = accel[0];
@@ -221,9 +249,9 @@ static void GravityEKF_Update(const float gyro[3], const float accel[3])
 		gravity_vector[2] = accel[2];
 		return;
 	}
-    float gxdt = gyro[0] * IMU_UPDATE_PERIOD_S;
-    float gydt = gyro[1] * IMU_UPDATE_PERIOD_S;
-    float gzdt = gyro[2] * IMU_UPDATE_PERIOD_S;
+    float gxdt = gyro[0] * dt;
+    float gydt = gyro[1] * dt;
+    float gzdt = gyro[2] * dt;
 
     gravity_kf.Data.A[1] = gzdt;
     gravity_kf.Data.A[2] = -gydt;
